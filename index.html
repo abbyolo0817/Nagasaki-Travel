@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>長崎旅遊小助手 - 欸比 & 歐膩</title>
+    
+    <!-- 1. Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2. React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- 3. Lucide 圖示 (React 專用 UMD 版本) -->
+    <script src="https://unpkg.com/lucide-react/dist/umd/lucide-react.js"></script>
+    
+    <!-- 4. Babel (讓瀏覽器即時解析 JSX) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- 5. Firebase (兼容版 SDK) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;700;900&family=Noto+Serif+TC:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #6F7F8C; /* 霧灰藍 */
+            color: #F2F2F0;
+            overflow-x: hidden;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .font-serif-aesthetic { font-family: 'Noto Serif TC', serif; }
+        .font-italic-aesthetic { font-family: 'Noto Serif TC', serif; font-style: italic; }
+
+        /* 蓋章效果動畫 */
+        .stamp {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-15deg) scale(4);
+            border: 4px solid #F87171;
+            color: #F87171;
+            padding: 4px 12px;
+            font-size: 24px;
+            font-weight: 900;
+            text-transform: uppercase;
+            border-radius: 8px;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 20;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-blur: 1px;
+            mask-image: url('https://www.transparenttextures.com/patterns/felt.png');
+        }
+
+        /* 勾選後的狀態變化 */
+        .item-settled {
+            opacity: 0.5;
+            filter: grayscale(0.5);
+        }
+        
+        .item-settled .stamp {
+            opacity: 0.9;
+            transform: translate(-50%, -50%) rotate(-15deg) scale(1);
+        }
+
+        .texture-felt {
+            background-image: url('https://www.transparenttextures.com/patterns/felt.png');
+        }
+        
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+
+        @keyframes zoomIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-zoom { animation: zoomIn 0.3s ease-out; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-presets="react">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- Firebase 配置 ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyCrP8DBTUN4lw95bwseGZTzFqfsK2oUZ2k",
+            authDomain: "nagasaki-travel.firebaseapp.com",
+            projectId: "nagasaki-travel",
+            storageBucket: "nagasaki-travel.firebasestorage.app",
+            messagingSenderId: "792460448732",
+            appId: "1:792460448732:web:32fe93e3519c97a3a43519",
+            measurementId: "G-6LBVHRZGH0"
+        };
+
+        // 初始化 Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const targetAppId = 'nagasaki-travel-official';
+
+        const USERS = ["欸比", "歐膩"];
+
+        // 圖示組件修復：正確讀取全域變數 window.lucideReact
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const LucideIcon = window.lucideReact ? window.lucideReact[name] : null;
+            if (!LucideIcon) return null;
+            return <LucideIcon size={size} className={className} />;
+        };
+
+        const initialItinerary = [
+            { day: 1, title: 'JR 博多 → 長崎', location: '長崎車站', note: '開啟慢活模式', category: '交通', order: 0, comments: [] },
+            { day: 1, title: '飯店寄行李', location: 'Hotel Forza Nagasaki', note: '就在眼鏡橋旁，非常方便', category: '住宿', order: 1, comments: [] },
+            { day: 1, title: '新地中華街吃一碗強棒麵', location: '長崎新地中華街', note: '推薦四海樓或江山樓', category: '餐飲', order: 2, comments: [] },
+            { day: 1, title: '眼鏡橋、中島川散步', location: '眼鏡橋', note: '找找看心形石', category: '觀光', order: 3, comments: [] },
+            { day: 2, title: '原爆資料館＋和平公園', location: '長崎原爆資料館', note: '理解城市的重量', category: '觀光', order: 0, comments: [] },
+            { day: 2, title: '午餐：土耳其飯', location: 'ツル茶ん', note: '必吃特色料理', category: '餐飲', order: 1, comments: [] },
+            { day: 2, title: '大浦天主堂 → 哥拉巴園', location: '哥拉巴園', note: '俯瞰長崎港美景', category: '觀光', order: 2, comments: [] },
+            { day: 2, title: '下午茶：中島川河畔', location: '中島川', note: '慢慢收尾', category: '餐飲', order: 3, comments: [] }
+        ];
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [activeTab, setActiveTab] = useState('day1');
+            const [itinerary, setItinerary] = useState([]);
+            const [expenses, setExpenses] = useState([]);
+            const [config, setConfig] = useState({ totalDays: 2 });
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [modalType, setModalType] = useState('itinerary'); 
+            const [editingId, setEditingId] = useState(null);
+            const [newItem, setNewItem] = useState({ title: '', location: '', note: '', day: 1, category: '觀光', mapUrl: '' });
+            const [newExpense, setNewExpense] = useState({ desc: '', amount: '', payer: '', abbyPortion: '', unniPortion: '', settled: false });
+            const [commentText, setCommentText] = useState({});
+
+            useEffect(() => {
+                auth.signInAnonymously().catch(err => console.error("Auth error:", err));
+                const unsubscribe = auth.onAuthStateChanged(setUser);
+                return () => unsubscribe();
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const rootRef = db.collection('artifacts').doc(targetAppId).collection('public').doc('data');
+                const itineraryRef = rootRef.collection('itinerary');
+                const expenseRef = rootRef.collection('expenses');
+                const configRef = rootRef.collection('settings').doc('config');
+
+                const unsubItinerary = itineraryRef.onSnapshot((snapshot) => {
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    if (data.length === 0) {
+                        initialItinerary.forEach(item => itineraryRef.add(item));
+                    } else {
+                        setItinerary(data.sort((a, b) => (a.order || 0) - (b.order || 0)));
+                    }
+                });
+                const unsubExpenses = expenseRef.onSnapshot((snapshot) => {
+                    setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                const unsubConfig = configRef.onSnapshot((snapshot) => {
+                    if (snapshot.exists) setConfig(snapshot.data());
+                    else configRef.set({ totalDays: 2 });
+                });
+
+                return () => { unsubItinerary(); unsubExpenses(); unsubConfig(); };
+            }, [user]);
+
+            const saveItem = async () => {
+                if (!newItem.title || !user) return;
+                const itineraryRef = db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('itinerary');
+                if (modalType === 'edit_itinerary' && editingId) {
+                    await itineraryRef.doc(editingId).update(newItem);
+                } else {
+                    await itineraryRef.add({ ...newItem, order: itinerary.length, comments: [] });
+                }
+                closeModal();
+            };
+
+            const deleteItem = async (id, type) => {
+                const collName = type === 'itinerary' ? 'itinerary' : 'expenses';
+                await db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection(collName).doc(id).delete();
+            };
+
+            const addDay = async () => {
+                const configRef = db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('settings').doc('config');
+                await configRef.update({ totalDays: (config.totalDays || 2) + 1 });
+            };
+
+            const postComment = async (itemId) => {
+                if (!commentText[itemId] || !user || !currentUser) return;
+                const item = itinerary.find(i => i.id === itemId);
+                const newComments = [...(item.comments || []), {
+                    user: currentUser, text: commentText[itemId],
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                }];
+                await db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('itinerary').doc(itemId).update({ comments: newComments });
+                setCommentText({ ...commentText, [itemId]: '' });
+            };
+
+            const saveExpense = async () => {
+                if (!newExpense.desc || !newExpense.amount) return;
+                const expenseRef = db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('expenses');
+                await expenseRef.add({ ...newExpense, 
+                    amount: parseFloat(newExpense.amount), 
+                    abbyPortion: parseFloat(newExpense.abbyPortion || 0), 
+                    unniPortion: parseFloat(newExpense.unniPortion || 0),
+                    payer: newExpense.payer || currentUser
+                });
+                closeModal();
+            };
+
+            const toggleSettled = async (expId, currentState) => {
+                await db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('expenses').doc(expId).update({ settled: !currentState });
+            };
+
+            const closeModal = () => {
+                setIsModalOpen(false);
+                setNewItem({ title: '', location: '', note: '', day: 1, category: '觀光', mapUrl: '' });
+                setNewExpense({ desc: '', amount: '', payer: currentUser, abbyPortion: '', unniPortion: '', settled: false });
+                setEditingId(null);
+            };
+
+            const openEdit = (item) => {
+                setNewItem({...item});
+                setEditingId(item.id);
+                setModalType('edit_itinerary');
+                setIsModalOpen(true);
+            };
+
+            const financialSummary = useMemo(() => {
+                let unniOwesAbby = 0, abbyOwesUnni = 0;
+                expenses.filter(e => !e.settled).forEach(e => {
+                    if (e.payer === '欸比') unniOwesAbby += (e.unniPortion || 0);
+                    else abbyOwesUnni += (e.abbyPortion || 0);
+                });
+                const balance = unniOwesAbby - abbyOwesUnni;
+                return { unniOwesAbby, abbyOwesUnni, balance, whoOwes: balance >= 0 ? '歐膩' : '欸比', absBalance: Math.abs(balance) };
+            }, [expenses]);
+
+            const categoryStyles = {
+                '餐飲': { bg: 'bg-[#9BA8B4]', icon: 'Utensils' },
+                '交通': { bg: 'bg-[#B4AFAB]', icon: 'Train' },
+                '住宿': { bg: 'bg-[#7D8A94]', icon: 'Bed' },
+                '觀光': { bg: 'bg-[#A29E99]', icon: 'Camera' }
+            };
+
+            if (!currentUser) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-8 relative overflow-hidden text-[#F2F2F0]">
+                        <div className="fixed inset-0 opacity-[0.08] texture-felt z-0"></div>
+                        <div className="relative z-10 w-full max-w-sm text-center">
+                            <div className="mb-12 animate-zoom">
+                                <div className="w-20 h-20 bg-white/5 border border-white/10 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl">
+                                    {/* 1. 身份選擇上方圖示修復 */}
+                                    <Icon name="Ship" size={40} className="text-[#F2F2F0]" />
+                                </div>
+                                <h1 className="text-4xl tracking-tighter leading-none mb-4">
+                                    <span className="font-italic-aesthetic text-3xl block mb-1 opacity-80">Nagasaki.</span>
+                                    <span className="font-serif-aesthetic font-bold">長崎</span>
+                                </h1>
+                                <p className="text-white/40 text-[10px] uppercase tracking-widest mb-8">選擇你的身分進入手帳</p>
+                            </div>
+                            <div className="space-y-4">
+                                {USERS.map(name => (
+                                    <button key={name} onClick={() => setCurrentUser(name)} className="w-full py-5 rounded-2xl bg-[#8A857D] font-bold tracking-[0.2em] shadow-xl border border-white/5 active:scale-95 transition-all">我是 {name}</button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen relative overflow-x-hidden text-[#F2F2F0] pb-10">
+                    <div className="fixed inset-0 opacity-[0.08] texture-felt z-0"></div>
+                    
+                    <header className="px-8 pt-16 pb-10 max-w-md mx-auto relative z-10">
+                        <div className="flex justify-between items-start mb-10">
+                            <div>
+                                <h1 className="text-4xl tracking-tighter leading-none">
+                                    <span className="font-italic-aesthetic text-3xl block mb-1 opacity-80">Nagasaki.</span>
+                                    <span className="font-serif-aesthetic font-bold">長崎</span>
+                                </h1>
+                                <p className="text-white/30 font-bold text-[9px] tracking-[0.4em] uppercase mt-4">Abby & Unni's Adventure</p>
+                            </div>
+                            {/* 2. 右上角「切換帳號」修復 */}
+                            <div className="flex flex-col items-end gap-2">
+                                <div className="flex items-center gap-2 bg-white/5 border border-white/10 py-2 px-3 rounded-xl shadow-lg backdrop-blur-sm">
+                                    <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">{currentUser}</span>
+                                    <Icon name="User" size={14} />
+                                </div>
+                                <button 
+                                    onClick={() => setCurrentUser(null)} 
+                                    className="text-[9px] text-white/20 font-bold uppercase tracking-widest flex items-center gap-1 hover:text-white transition-colors"
+                                >
+                                    <Icon name="RefreshCcw" size={10} /> 切換帳號
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 p-1.5 rounded-2xl bg-black/10 backdrop-blur-md overflow-x-auto no-scrollbar">
+                            {Array.from({ length: config.totalDays || 2 }, (_, i) => (
+                                <button key={i} onClick={() => setActiveTab(`day${i+1}`)} className={`flex-none py-3 px-6 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === `day${i+1}` ? 'bg-[#8A857D] shadow-lg' : 'opacity-40'}`}>第 {i+1} 天</button>
+                            ))}
+                            <button onClick={() => setActiveTab('split')} className={`flex-none py-3 px-6 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === 'split' ? 'bg-[#8A857D] shadow-lg' : 'opacity-40'}`}>分帳紀錄</button>
+                        </div>
+                    </header>
+
+                    <main className="px-8 max-w-md mx-auto relative z-10">
+                        {activeTab.startsWith('day') && (
+                            <div className="space-y-6 pb-28">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-xl font-bold tracking-tight flex items-center gap-3">
+                                        <div className="bg-[#8A857D] w-10 h-10 rounded-lg flex items-center justify-center text-lg font-serif-aesthetic shadow-inner border border-white/10">{activeTab.replace('day', '')}</div>
+                                        <span>第 {activeTab.replace('day', '')} 天</span>
+                                    </h2>
+                                    {activeTab === `day${config.totalDays}` && <button onClick={addDay} className="text-white/20 text-xs flex items-center gap-1 transition-colors"><Icon name="Plus" size={14} /> 新增天數</button>}
+                                </div>
+                                {itinerary.filter(i => i.day === parseInt(activeTab.replace('day', ''))).map(item => (
+                                    <div key={item.id} className="bg-[#8A857D] rounded-3xl p-6 shadow-xl border border-white/5 relative overflow-hidden mb-6 animate-in fade-in slide-in-from-bottom-2">
+                                        <div className="relative z-10">
+                                            <div className="flex justify-between mb-4">
+                                                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-lg ${categoryStyles[item.category]?.bg || 'bg-white/10'} text-[10px] font-bold uppercase tracking-widest shadow-sm`}>
+                                                    {/* 3. 分類圖示修復 */}
+                                                    <Icon name={categoryStyles[item.category]?.icon || 'Camera'} size={12} />
+                                                    {item.category}
+                                                </div>
+                                                <div className="flex gap-3 opacity-30">
+                                                    <button onClick={() => openEdit(item)}><Icon name="Edit3" size={16} /></button>
+                                                    <button onClick={() => deleteItem(item.id, 'itinerary')}><Icon name="Trash2" size={16} /></button>
+                                                </div>
+                                            </div>
+                                            <h3 className="text-lg font-bold mb-2 tracking-tight leading-tight">{item.title}</h3>
+                                            <div className="flex items-center gap-3 text-white/50 text-xs mb-4">
+                                                <div className="flex items-center gap-1 flex-1 min-w-0">
+                                                    <Icon name="MapPin" size={14} /> 
+                                                    <span className="truncate">{item.location}</span>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    {/* 3. 地圖/導航圖示修復 */}
+                                                    {item.mapUrl && <button onClick={() => window.open(item.mapUrl, '_blank')} className="w-10 h-10 flex items-center justify-center bg-blue-500/20 text-blue-200 rounded-full active:scale-90 transition-transform"><Icon name="Navigation" size={18} /></button>}
+                                                    <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.location + ' 長崎')}`, '_blank')} className="w-10 h-10 flex items-center justify-center bg-white/10 text-white rounded-full active:scale-90 transition-transform"><Icon name="MapPin" size={18} /></button>
+                                                </div>
+                                            </div>
+                                            {item.note && <div className="bg-black/10 p-4 rounded-2xl text-[11px] text-white/60 italic mb-4 border border-white/5 leading-relaxed">{item.note}</div>}
+                                            <div className="pt-4 border-t border-white/5">
+                                                {/* 3. 留言板圖示修復 */}
+                                                <div className="flex items-center gap-2 mb-3 text-[10px] font-bold uppercase tracking-widest text-white/30"><Icon name="MessageSquare" size={12} /> 留言板</div>
+                                                <div className="space-y-2 mb-3 max-h-40 overflow-y-auto no-scrollbar">
+                                                    {(item.comments || []).map((c, i) => (
+                                                        <div key={i} className={`flex flex-col ${c.user === currentUser ? 'items-end' : 'items-start'}`}>
+                                                            <div className={`px-3 py-1.5 rounded-2xl text-[11px] ${c.user === currentUser ? 'bg-blue-500/30 text-white rounded-tr-none' : 'bg-white/10 text-white/80 rounded-tl-none'}`}>{c.text}</div>
+                                                            <span className="text-[8px] opacity-20 mt-1 font-bold tracking-widest">{c.user}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <input value={commentText[item.id] || ''} onChange={e => setCommentText({...commentText, [item.id]: e.target.value})} placeholder="說點什麼..." onKeyDown={e => e.key === 'Enter' && postComment(item.id)} className="flex-1 bg-white/5 border-none rounded-xl px-4 py-2.5 text-xs outline-none focus:bg-white/10 transition-colors" />
+                                                    <button onClick={() => postComment(item.id)} className="p-2.5 bg-white/5 rounded-xl hover:bg-white/10 transition-colors"><Icon name="Send" size={14} /></button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {activeTab === 'split' && (
+                            <div className="space-y-6 pb-28 animate-zoom">
+                                <div className="bg-[#8A857D] p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden border border-white/10 text-center">
+                                    <div className="absolute inset-0 opacity-[0.05] texture-felt z-0 pointer-events-none"></div>
+                                    <p className="text-white/40 text-[10px] font-bold uppercase tracking-[0.4em] mb-4">結算摘要</p>
+                                    <div className="flex justify-around items-center mb-6 relative z-10 text-center">
+                                        <div className="text-center"><p className="text-[10px] opacity-40 mb-1">歐膩付</p><p className="text-lg font-bold tracking-tight">¥{financialSummary.unniOwesAbby.toLocaleString()}</p></div>
+                                        <div className="w-[1px] h-8 bg-white/10"></div>
+                                        <div className="text-center"><p className="text-[10px] opacity-40 mb-1">欸比付</p><p className="text-lg font-bold tracking-tight">¥{financialSummary.abbyOwesUnni.toLocaleString()}</p></div>
+                                    </div>
+                                    <div className="bg-black/20 p-5 rounded-3xl text-center relative z-10 shadow-inner">
+                                        <h2 className="text-xl font-black tracking-tight">{financialSummary.absBalance === 0 ? "全部結清囉！" : `${financialSummary.whoOwes} 還需支付 ¥${financialSummary.absBalance.toLocaleString()}`}</h2>
+                                    </div>
+                                </div>
+                                <div className="space-y-4">
+                                    <h4 className="text-white/30 font-bold text-[10px] tracking-[0.3em] uppercase ml-4">消費清單</h4>
+                                    {expenses.map(exp => (
+                                        <div key={exp.id} className={`bg-[#8A857D] p-5 rounded-3xl border border-white/5 relative mb-4 shadow-lg overflow-hidden transition-all ${exp.settled ? 'item-settled' : ''}`}>
+                                            {/* 4. 已付款蓋章效果修復 */}
+                                            <div className="stamp font-serif-aesthetic">已付款</div>
+                                            <div className="flex justify-between items-start mb-4 relative z-10">
+                                                <div className="flex items-center gap-4">
+                                                    <button onClick={() => toggleSettled(exp.id, exp.settled)} className="transition-transform active:scale-75">
+                                                        {exp.settled ? <Icon name="CheckCircle2" className="text-green-400" size={22} /> : <Icon name="Circle" size={22} className="text-white/20" />}
+                                                    </button>
+                                                    <div>
+                                                        <p className="font-bold text-sm tracking-tight">{exp.desc}</p>
+                                                        <p className="text-[10px] opacity-40 font-bold uppercase tracking-wider">{exp.payer} 先付了 ¥{exp.amount.toLocaleString()}</p>
+                                                    </div>
+                                                </div>
+                                                <button onClick={() => deleteItem(exp.id, 'expenses')} className="opacity-10 hover:opacity-100 transition-opacity"><Icon name="X" size={16}/></button>
+                                            </div>
+                                            <div className="flex gap-4 text-[10px] opacity-40 border-t border-white/5 pt-3 relative z-10 font-bold tracking-wider">
+                                                <div className="flex-1">欸比份額: <span className="text-white">¥{(exp.abbyPortion || 0).toLocaleString()}</span></div>
+                                                <div className="flex-1">歐膩份額: <span className="text-white">¥{(exp.unniPortion || 0).toLocaleString()}</span></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {expenses.length === 0 && <p className="text-center py-20 opacity-20 text-[10px] font-bold uppercase tracking-widest italic">尚未有支出記錄</p>}
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* 3. 右下角「新增」圖示修復 */}
+                    <button 
+                        onClick={() => { setModalType(activeTab === 'split' ? 'expense' : 'itinerary'); setIsModalOpen(true); }} 
+                        className="fixed bottom-10 right-8 w-15 h-15 bg-[#8A857D] rounded-[2rem] flex items-center justify-center shadow-2xl z-30 active:scale-90 border border-white/10 shadow-white/5 transition-all p-4"
+                    >
+                        <Icon name="Plus" size={30} className="text-white" />
+                    </button>
+
+                    {isModalOpen && (
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-end justify-center px-4 animate-in fade-in duration-300" onClick={(e) => e.target === e.currentTarget && closeModal()}>
+                            <div className="bg-[#6F7F8C] w-full max-w-md rounded-t-[3rem] p-10 space-y-6 animate-in slide-in-from-bottom duration-500 border-t border-white/10 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar text-[#F2F2F0]">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h2 className="text-2xl font-light tracking-tighter">{modalType === 'itinerary' ? '新增行程' : modalType === 'edit_itinerary' ? '修改行程' : '新增支出'}</h2>
+                                    <button onClick={closeModal} className="bg-white/5 w-10 h-10 rounded-full flex items-center justify-center opacity-40 active:scale-90 transition-transform"><Icon name="X" size={20}/></button>
+                                </div>
+                                {modalType.includes('itinerary') ? (
+                                    <div className="space-y-5">
+                                        <div className="space-y-1"><label className="text-[10px] opacity-30 font-bold tracking-widest ml-2">標題</label><input placeholder="行程名稱" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newItem.title} onChange={e => setNewItem({...newItem, title: e.target.value})} /></div>
+                                        <div className="space-y-1"><label className="text-[10px] opacity-30 font-bold tracking-widest ml-2">地點</label><input placeholder="Google 地圖搜尋名稱" className="w-full bg-white/5 rounded-2xl p-4 text-sm outline-none border border-white/5" value={newItem.location} onChange={e => setNewItem({...newItem, location: e.target.value})} /></div>
+                                        <div className="space-y-1"><label className="text-[10px] opacity-30 font-bold tracking-widest ml-2">導航連結</label><input placeholder="可貼上 Google Maps 網址" className="w-full bg-white/5 rounded-2xl p-4 text-xs outline-none border border-white/5" value={newItem.mapUrl} onChange={e => setNewItem({...newItem, mapUrl: e.target.value})} /></div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1"><label className="text-[10px] opacity-30 font-bold ml-2 text-white">日期</label><select className="w-full bg-white/5 rounded-2xl p-4 text-sm appearance-none outline-none border border-white/5 text-white" value={newItem.day} onChange={e => setNewItem({...newItem, day: parseInt(e.target.value)})}>{Array.from({ length: config.totalDays || 2 }, (_, i) => <option key={i} value={i+1} className="text-black">第 {i+1} 天</option>)}</select></div>
+                                            <div className="space-y-1"><label className="text-[10px] opacity-30 font-bold ml-2 text-white">類別</label><select className="w-full bg-white/5 rounded-2xl p-4 text-sm appearance-none outline-none border border-white/5 text-white" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}><option value="觀光" className="text-black">觀光</option><option value="餐飲" className="text-black">餐飲</option><option value="交通" className="text-black">交通</option><option value="住宿" className="text-black">住宿</option></select></div>
+                                        </div>
+                                        <div className="space-y-1"><label className="text-[10px] opacity-30 font-bold tracking-widest ml-2 text-white">備註</label><textarea placeholder="寫些小筆記..." className="w-full bg-white/5 rounded-2xl p-4 h-24 text-sm outline-none border border-white/5" value={newItem.note} onChange={e => setNewItem({...newItem, note: e.target.value})} /></div>
+                                        <button onClick={saveItem} className="w-full py-5 rounded-2xl bg-[#8A857D] font-black text-xs uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all">儲存行程</button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-5 text-white">
+                                        <div className="space-y-1"><label className="text-[10px] opacity-30 font-bold tracking-widest ml-2">項目內容</label><input placeholder="例如：強棒麵午餐" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5" value={newExpense.desc} onChange={e => setNewExpense({...newExpense, desc: e.target.value})} /></div>
+                                        <div className="flex gap-4">
+                                            <div className="flex-1 space-y-1"><label className="text-[10px] opacity-30 font-bold tracking-widest ml-2">總額 (JPY)</label><input type="number" placeholder="¥ 0" className="w-full bg-white/5 rounded-2xl p-4 text-lg outline-none border border-white/5" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} /></div>
+                                            <div className="w-32 space-y-1"><label className="text-[10px] opacity-30 font-bold tracking-widest ml-2">付款人</label><select className="w-full bg-white/5 rounded-2xl p-4 text-sm outline-none appearance-none border border-white/5 text-white" value={newExpense.payer} onChange={e => setNewExpense({...newExpense, payer: e.target.value})}><option value="欸比" className="text-black">欸比付</option><option value="歐膩" className="text-black">歐膩付</option></select></div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1"><label className="text-[10px] opacity-30 font-bold tracking-widest ml-2 text-white">欸比應付</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 text-white" value={newExpense.abbyPortion} onChange={e => setNewExpense({...newExpense, abbyPortion: e.target.value})} /></div>
+                                            <div className="space-y-1"><label className="text-[10px] opacity-30 font-bold tracking-widest ml-2 text-white">歐膩應付</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 text-white" value={newExpense.unniPortion} onChange={e => setNewExpense({...newExpense, unniPortion: e.target.value})} /></div>
+                                        </div>
+                                        <button onClick={saveExpense} className="w-full py-5 rounded-2xl bg-[#8A857D] font-black text-xs uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all">紀錄支出</button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
