@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>長崎旅遊小助手 - 欸比 & 歐膩</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;700;900&family=Noto+Serif+TC:ital,wght@1,400;1,700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #6F7F8C; /* 霧灰藍 */
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        /* 蓋章效果動畫 */
+        .stamp {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-15deg);
+            border: 4px solid #F87171;
+            color: #F87171;
+            padding: 4px 12px;
+            font-size: 24px;
+            font-weight: 900;
+            text-transform: uppercase;
+            border-radius: 8px;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 20;
+            background: rgba(255, 255, 255, 0.1);
+            mask-image: url('https://www.transparenttextures.com/patterns/felt.png');
+        }
+
+        .item-settled .stamp {
+            opacity: 0.8;
+            transform: translate(-50%, -50%) rotate(-15deg) scale(1.1);
+        }
+
+        .item-settled {
+            opacity: 0.5;
+            filter: grayscale(0.5);
+        }
+
+        /* 質感紋理 */
+        .texture-felt {
+            background-image: url('https://www.transparenttextures.com/patterns/felt.png');
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- Firebase 初始化 ---
+        // 注意：發佈到 GitHub 前，請將下方的配置替換為你自己的 Firebase Config
+        const firebaseConfig = {
+          apiKey: "AIzaSyCrP8DBTUN4lw95bwseGZTzFqfsK2oUZ2k",
+          authDomain: "nagasaki-travel.firebaseapp.com",
+          projectId: "nagasaki-travel",
+          storageBucket: "nagasaki-travel.firebasestorage.app",
+          messagingSenderId: "792460448732",
+          appId: "1:792460448732:web:32fe93e3519c97a3a43519",
+          measurementId: "G-6LBVHRZGH0"
+        };
+
+        // 如果是透過 Canvas 執行的環境會自動注入配置，如果沒有則使用上面的
+        const configToUse = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : firebaseConfig;
+        
+        // 延遲載入 Firebase 模組 (透過 ESM)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const app = initializeApp(configToUse);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const targetAppId = typeof __app_id !== 'undefined' ? __app_id : 'nagasaki-pro-planner';
+
+        const USERS = ["欸比", "歐膩"];
+
+        // 圖示組件介面
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const LucideIcon = lucide[name];
+            if (!LucideIcon) return null;
+            return <LucideIcon size={size} className={className} />;
+        };
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [activeTab, setActiveTab] = useState('day1');
+            const [itinerary, setItinerary] = useState([]);
+            const [expenses, setExpenses] = useState([]);
+            const [config, setConfig] = useState({ totalDays: 2 });
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [modalType, setModalType] = useState('itinerary'); 
+            const [editingId, setEditingId] = useState(null);
+            const [newItem, setNewItem] = useState({ title: '', location: '', note: '', day: 1, category: 'spot', mapUrl: '' });
+            const [newExpense, setNewExpense] = useState({ desc: '', amount: '', payer: '', abbyPortion: '', unniPortion: '', settled: false });
+            const [commentText, setCommentText] = useState({});
+
+            const theme = { primary: '#6F7F8C', secondary: '#8A857D', text: '#F2F2F0' };
+
+            useEffect(() => {
+                signInAnonymously(auth).catch(err => console.error("Auth error:", err));
+                const unsubscribe = onAuthStateChanged(auth, setUser);
+                return () => unsubscribe();
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const itineraryRef = collection(db, 'artifacts', targetAppId, 'public', 'data', 'itinerary');
+                const expenseRef = collection(db, 'artifacts', targetAppId, 'public', 'data', 'expenses');
+                const configRef = doc(db, 'artifacts', targetAppId, 'public', 'data', 'settings', 'config');
+
+                const unsubItinerary = onSnapshot(itineraryRef, (snapshot) => {
+                    setItinerary(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => (a.order || 0) - (b.order || 0)));
+                });
+                const unsubExpenses = onSnapshot(expenseRef, (snapshot) => {
+                    setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                const unsubConfig = onSnapshot(configRef, (snapshot) => {
+                    if (snapshot.exists()) setConfig(snapshot.data());
+                    else setDoc(configRef, { totalDays: 2 });
+                });
+
+                return () => { unsubItinerary(); unsubExpenses(); unsubConfig(); };
+            }, [user]);
+
+            const saveItem = async () => {
+                if (!newItem.title || !user) return;
+                const itineraryRef = collection(db, 'artifacts', targetAppId, 'public', 'data', 'itinerary');
+                if (modalType === 'edit_itinerary' && editingId) {
+                    await updateDoc(doc(db, 'artifacts', targetAppId, 'public', 'data', 'itinerary', editingId), newItem);
+                } else {
+                    await addDoc(itineraryRef, { ...newItem, order: itinerary.length, comments: [] });
+                }
+                closeModal();
+            };
+
+            const deleteItem = async (id, type) => {
+                const collName = type === 'itinerary' ? 'itinerary' : 'expenses';
+                await deleteDoc(doc(db, 'artifacts', targetAppId, 'public', 'data', collName, id));
+            };
+
+            const addDay = async () => {
+                const configRef = doc(db, 'artifacts', targetAppId, 'public', 'data', 'settings', 'config');
+                await updateDoc(configRef, { totalDays: (config.totalDays || 2) + 1 });
+            };
+
+            const postComment = async (itemId) => {
+                if (!commentText[itemId] || !user || !currentUser) return;
+                const item = itinerary.find(i => i.id === itemId);
+                const newComments = [...(item.comments || []), {
+                    user: currentUser, text: commentText[itemId],
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                }];
+                await updateDoc(doc(db, 'artifacts', targetAppId, 'public', 'data', 'itinerary', itemId), { comments: newComments });
+                setCommentText({ ...commentText, [itemId]: '' });
+            };
+
+            const saveExpense = async () => {
+                if (!newExpense.desc || !newExpense.amount) return;
+                const expenseRef = collection(db, 'artifacts', targetAppId, 'public', 'data', 'expenses');
+                await addDoc(expenseRef, { ...newExpense, 
+                    amount: parseFloat(newExpense.amount), 
+                    abbyPortion: parseFloat(newExpense.abbyPortion || 0), 
+                    unniPortion: parseFloat(newExpense.unniPortion || 0),
+                    payer: newExpense.payer || currentUser
+                });
+                closeModal();
+            };
+
+            const toggleSettled = async (expId, currentState) => {
+                await updateDoc(doc(db, 'artifacts', targetAppId, 'public', 'data', 'expenses', expId), { settled: !currentState });
+            };
+
+            const closeModal = () => {
+                setIsModalOpen(false);
+                setNewItem({ title: '', location: '', note: '', day: 1, category: 'spot', mapUrl: '' });
+                setNewExpense({ desc: '', amount: '', payer: currentUser, abbyPortion: '', unniPortion: '', settled: false });
+                setEditingId(null);
+            };
+
+            const openEdit = (item) => {
+                setNewItem({...item});
+                setEditingId(item.id);
+                setModalType('edit_itinerary');
+                setIsModalOpen(true);
+            };
+
+            const financialSummary = useMemo(() => {
+                let unniOwesAbby = 0, abbyOwesUnni = 0;
+                expenses.filter(e => !e.settled).forEach(e => {
+                    if (e.payer === '欸比') unniOwesAbby += (e.unniPortion || 0);
+                    else abbyOwesUnni += (e.abbyPortion || 0);
+                });
+                const balance = unniOwesAbby - abbyOwesUnni;
+                return { unniOwesAbby, abbyOwesUnni, balance, whoOwes: balance >= 0 ? '歐膩' : '欸比', absBalance: Math.abs(balance) };
+            }, [expenses]);
+
+            if (!currentUser) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-8 relative overflow-hidden text-[#F2F2F0]">
+                        <div className="fixed inset-0 opacity-[0.08] texture-felt z-0"></div>
+                        <div className="relative z-10 w-full max-w-sm text-center">
+                            <div className="mb-12">
+                                <div className="w-20 h-20 bg-white/5 border border-white/10 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl">
+                                    <Icon name="Ship" size={40} />
+                                </div>
+                                <h1 className="text-3xl font-light tracking-tighter mb-2">Nagasaki Trip.</h1>
+                                <p className="text-white/30 text-[10px] uppercase tracking-[0.4em] font-bold">請選擇身份開始</p>
+                            </div>
+                            <div className="space-y-4">
+                                {USERS.map(name => (
+                                    <button key={name} onClick={() => setCurrentUser(name)} className="w-full py-5 rounded-2xl bg-[#8A857D] font-bold tracking-[0.2em] shadow-xl border border-white/5 active:scale-95 transition-all">我是 {name}</button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen relative overflow-x-hidden text-[#F2F2F0] pb-10">
+                    <div className="fixed inset-0 opacity-[0.08] texture-felt z-0"></div>
+                    
+                    <header className="px-8 pt-16 pb-10 max-w-md mx-auto relative z-10">
+                        <div className="flex justify-between items-start mb-10">
+                            <div>
+                                <h1 className="text-3xl font-light tracking-tighter">Nagasaki <span className="opacity-30">/</span> 長崎</h1>
+                                <p className="text-white/30 font-bold text-[9px] tracking-[0.4em] uppercase mt-3">Abby & Unni's Adventure</p>
+                            </div>
+                            <div className="flex flex-col items-end gap-2">
+                                <div className="flex items-center gap-2 bg-white/5 border border-white/10 py-2 px-3 rounded-xl shadow-lg">
+                                    <span className="text-[10px] font-black text-white/60 uppercase">{currentUser}</span>
+                                    <Icon name="User" size={14} />
+                                </div>
+                                <button onClick={() => setCurrentUser(null)} className="text-[9px] text-white/20 font-bold uppercase tracking-widest"><Icon name="LogOut" size={10} className="inline mr-1" /> 登出</button>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 p-1.5 rounded-2xl bg-black/10 backdrop-blur-md overflow-x-auto no-scrollbar">
+                            {Array.from({ length: config.totalDays || 2 }, (_, i) => (
+                                <button key={i} onClick={() => setActiveTab(`day${i+1}`)} className={`flex-none py-3 px-6 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === `day${i+1}` ? 'bg-[#8A857D] shadow-lg' : 'opacity-40'}`}>第 {i+1} 天</button>
+                            ))}
+                            <button onClick={() => setActiveTab('split')} className={`flex-none py-3 px-6 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${activeTab === 'split' ? 'bg-[#8A857D] shadow-lg' : 'opacity-40'}`}>分帳紀錄</button>
+                        </div>
+                    </header>
+
+                    <main className="px-8 max-w-md mx-auto relative z-10">
+                        {activeTab.startsWith('day') && (
+                            <div className="space-y-6 pb-28">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h2 className="text-xl font-bold tracking-tight flex items-center gap-3">
+                                        <div className="bg-[#8A857D] w-10 h-10 rounded-lg flex items-center justify-center text-sm">{activeTab.replace('day', '')}</div>
+                                        第 {activeTab.replace('day', '')} 天
+                                    </h2>
+                                    {activeTab === `day${config.totalDays}` && <button onClick={addDay} className="text-white/20 text-xs"><Icon name="Plus" size={14} className="inline" /> 新增天數</button>}
+                                </div>
+                                {itinerary.filter(i => i.day === parseInt(activeTab.replace('day', ''))).map(item => (
+                                    <div key={item.id} className="bg-[#8A857D] rounded-3xl p-6 shadow-xl border border-white/5 relative overflow-hidden">
+                                        <div className="relative z-10">
+                                            <div className="flex justify-between mb-4">
+                                                <span className="bg-white/10 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest">{item.category}</span>
+                                                <div className="flex gap-3 opacity-30">
+                                                    <button onClick={() => openEdit(item)}><Icon name="Edit3" size={16} /></button>
+                                                    <button onClick={() => deleteItem(item.id, 'itinerary')}><Icon name="Trash2" size={16} /></button>
+                                                </div>
+                                            </div>
+                                            <h3 className="text-lg font-bold mb-2">{item.title}</h3>
+                                            <div className="flex items-center gap-2 text-white/50 text-xs mb-4">
+                                                <Icon name="MapPin" size={14} /> <span>{item.location}</span>
+                                                <div className="flex gap-1 ml-auto">
+                                                    {item.mapUrl && <button onClick={() => window.open(item.mapUrl, '_blank')} className="p-2 bg-blue-500/20 rounded-full"><Icon name="Navigation" size={14} /></button>}
+                                                    <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.location)}`, '_blank')} className="p-2 bg-white/10 rounded-full"><Icon name="MapPin" size={14} /></button>
+                                                </div>
+                                            </div>
+                                            {item.note && <p className="bg-black/10 p-4 rounded-2xl text-xs text-white/60 italic mb-4">{item.note}</p>}
+                                            <div className="pt-4 border-t border-white/5">
+                                                <div className="space-y-2 mb-3">
+                                                    {(item.comments || []).map((c, i) => (
+                                                        <div key={i} className={`flex flex-col ${c.user === currentUser ? 'items-end' : 'items-start'}`}>
+                                                            <div className={`px-3 py-1.5 rounded-2xl text-[11px] ${c.user === currentUser ? 'bg-blue-500/30' : 'bg-white/10'}`}>{c.text}</div>
+                                                            <span className="text-[8px] opacity-20 mt-1">{c.user} · {c.time}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <input value={commentText[item.id] || ''} onChange={e => setCommentText({...commentText, [item.id]: e.target.value})} placeholder="說點什麼..." onKeyDown={e => e.key === 'Enter' && postComment(item.id)} className="flex-1 bg-white/5 rounded-xl px-4 py-2 text-xs outline-none" />
+                                                    <button onClick={() => postComment(item.id)} className="p-2 bg-white/5 rounded-xl"><Icon name="Send" size={14} /></button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {activeTab === 'split' && (
+                            <div className="space-y-6 pb-28">
+                                <div className="bg-[#8A857D] p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden border border-white/10">
+                                    <p className="text-center text-white/40 text-[10px] font-bold uppercase tracking-[0.4em] mb-4">結算摘要</p>
+                                    <div className="flex justify-around items-center mb-6">
+                                        <div className="text-center"><p className="text-[10px] opacity-40 mb-1">歐膩付</p><p className="text-lg font-bold">¥{financialSummary.unniOwesAbby.toLocaleString()}</p></div>
+                                        <div className="text-center"><p className="text-[10px] opacity-40 mb-1">欸比付</p><p className="text-lg font-bold">¥{financialSummary.abbyOwesUnni.toLocaleString()}</p></div>
+                                    </div>
+                                    <div className="bg-black/20 p-4 rounded-2xl text-center">
+                                        <h2 className="text-xl font-black">{financialSummary.absBalance === 0 ? "已結清" : `${financialSummary.whoOwes} 還需 ¥${financialSummary.absBalance.toLocaleString()}`}</h2>
+                                    </div>
+                                </div>
+                                {expenses.map(exp => (
+                                    <div key={exp.id} className={`bg-[#8A857D] p-5 rounded-3xl relative transition-all ${exp.settled ? 'item-settled' : ''}`}>
+                                        <div className="stamp">已付款</div>
+                                        <div className="flex justify-between items-start mb-3">
+                                            <div className="flex items-center gap-3">
+                                                <button onClick={() => toggleSettled(exp.id, exp.settled)} className="transition-transform active:scale-75">
+                                                    {exp.settled ? <Icon name="CheckCircle2" className="text-green-400" /> : <Icon name="Circle" />}
+                                                </button>
+                                                <div>
+                                                    <p className="font-bold text-sm">{exp.desc}</p>
+                                                    <p className="text-[10px] opacity-30">{exp.payer} 付了 ¥{exp.amount}</p>
+                                                </div>
+                                            </div>
+                                            <button onClick={() => deleteItem(exp.id, 'expenses')} className="opacity-20"><Icon name="X" size={14}/></button>
+                                        </div>
+                                        <div className="flex gap-4 text-[10px] opacity-40 border-t border-white/5 pt-3">
+                                            <div className="flex-1">欸比: ¥{exp.abbyPortion}</div>
+                                            <div className="flex-1">歐膩: ¥{exp.unniPortion}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </main>
+
+                    <button onClick={() => { setModalType(activeTab === 'split' ? 'expense' : 'itinerary'); setIsModalOpen(true); }} className="fixed bottom-10 right-8 w-14 h-14 bg-[#8A857D] rounded-full flex items-center justify-center shadow-2xl z-30 active:scale-90 transition-all border border-white/10"><Icon name="Plus" size={24} /></button>
+
+                    {isModalOpen && (
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-end justify-center px-4">
+                            <div className="bg-[#6F7F8C] w-full max-w-md rounded-t-[3rem] p-10 space-y-6 animate-in slide-in-from-bottom duration-500 border-t border-white/10 shadow-2xl max-h-[90vh] overflow-y-auto">
+                                <div className="flex justify-between items-center mb-2">
+                                    <h2 className="text-2xl font-light tracking-tighter">{modalType === 'itinerary' ? '新增行程' : modalType === 'edit_itinerary' ? '修改行程' : '新增花費'}</h2>
+                                    <button onClick={closeModal} className="bg-white/5 w-10 h-10 rounded-full flex items-center justify-center opacity-40"><Icon name="X" size={20}/></button>
+                                </div>
+                                {modalType.includes('itinerary') ? (
+                                    <div className="space-y-4">
+                                        <input placeholder="行程名稱" className="w-full bg-white/5 rounded-2xl p-4 outline-none" value={newItem.title} onChange={e => setNewItem({...newItem, title: e.target.value})} />
+                                        <input placeholder="地點名稱" className="w-full bg-white/5 rounded-2xl p-4 text-sm outline-none" value={newItem.location} onChange={e => setNewItem({...newItem, location: e.target.value})} />
+                                        <input placeholder="貼上 Google 地圖連結" className="w-full bg-white/5 rounded-2xl p-4 text-xs outline-none" value={newItem.mapUrl} onChange={e => setNewItem({...newItem, mapUrl: e.target.value})} />
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <select className="bg-white/5 rounded-2xl p-4 text-sm" value={newItem.day} onChange={e => setNewItem({...newItem, day: parseInt(e.target.value)})}>
+                                                {Array.from({ length: config.totalDays || 2 }, (_, i) => <option key={i} value={i+1} className="text-black">第 {i+1} 天</option>)}
+                                            </select>
+                                            <select className="bg-white/5 rounded-2xl p-4 text-sm" value={newItem.category} onChange={e => setNewItem({...newItem, category: e.target.value})}>
+                                                <option value="觀光" className="text-black">觀光</option>
+                                                <option value="餐飲" className="text-black">餐飲</option>
+                                                <option value="交通" className="text-black">交通</option>
+                                                <option value="住宿" className="text-black">住宿</option>
+                                            </select>
+                                        </div>
+                                        <textarea placeholder="備註..." className="w-full bg-white/5 rounded-2xl p-4 h-24 text-sm outline-none" value={newItem.note} onChange={e => setNewItem({...newItem, note: e.target.value})} />
+                                        <button onClick={saveItem} className="w-full py-4 rounded-2xl bg-[#8A857D] font-bold text-xs uppercase tracking-widest shadow-xl">儲存</button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <input placeholder="支出項目" className="w-full bg-white/5 rounded-2xl p-4 outline-none" value={newExpense.desc} onChange={e => setNewExpense({...newExpense, desc: e.target.value})} />
+                                        <div className="flex gap-4">
+                                            <input type="number" placeholder="總額 ¥" className="flex-1 bg-white/5 rounded-2xl p-4 outline-none" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} />
+                                            <select className="bg-white/5 rounded-2xl p-4 text-sm" value={newExpense.payer} onChange={e => setNewExpense({...newExpense, payer: e.target.value})}>
+                                                <option value="欸比" className="text-black">欸比付</option>
+                                                <option value="歐膩" className="text-black">歐膩付</option>
+                                            </select>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1"><label className="text-[10px] opacity-30 ml-2">欸比份額</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4" value={newExpense.abbyPortion} onChange={e => setNewExpense({...newExpense, abbyPortion: e.target.value})} /></div>
+                                            <div className="space-y-1"><label className="text-[10px] opacity-30 ml-2">歐膩份額</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4" value={newExpense.unniPortion} onChange={e => setNewExpense({...newExpense, unniPortion: e.target.value})} /></div>
+                                        </div>
+                                        <button onClick={saveExpense} className="w-full py-4 rounded-2xl bg-[#8A857D] font-bold text-xs uppercase tracking-widest shadow-xl">紀錄</button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
