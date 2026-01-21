@@ -323,16 +323,29 @@
                 setIsModalOpen(true);
             };
 
+            // 修復：加入資料防呆，避免 undefined 錯誤
             const saveTaskDetails = async () => {
                 if (!editingTask || !editingTask.text) return;
-                const ref = db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('todos').doc(editingTask.todoId);
-                const todo = todos.find(t => t.id === editingTask.todoId);
-                const newItems = todo.items.map(i => i.id === editingTask.id ? { ...i, text: editingTask.text, image: editingTask.image, url: editingTask.url } : i);
-                await ref.update({ items: newItems });
-                closeModal();
+                try {
+                    const ref = db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('todos').doc(editingTask.todoId);
+                    const todo = todos.find(t => t.id === editingTask.todoId);
+                    if (!todo) return;
+                    
+                    const newItems = todo.items.map(i => i.id === editingTask.id ? { 
+                        ...i, 
+                        text: editingTask.text, 
+                        image: editingTask.image || "", 
+                        url: editingTask.url || "" 
+                    } : i);
+                    
+                    await ref.update({ items: newItems });
+                    closeModal();
+                } catch (error) {
+                    console.error("Save Error:", error);
+                    alert("儲存失敗，請確認網路連線");
+                }
             };
 
-            // 圖片上傳與壓縮邏輯
             const handleImageUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -471,6 +484,7 @@
                                         <div className="flex items-center gap-3 text-white/50 text-xs mb-4">
                                             <div className="flex-1 truncate flex items-center gap-1"><Icon name="MapPin" size={14}/>{item.location}</div>
                                             <div className="flex gap-2">
+                                                {/* 只顯示導航按鈕 */}
                                                 {item.mapUrl && (
                                                     <button 
                                                         onClick={(e) => { e.stopPropagation(); window.open(item.mapUrl, '_blank'); }} 
@@ -603,7 +617,6 @@
                         <Icon name="Plus" size={32} className="text-[#3A434D]" />
                     </button>
 
-                    {/* MODAL */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[110] flex items-end justify-center px-4 animate-in fade-in duration-300" onClick={e => e.target === e.currentTarget && closeModal()}>
                             <div className="bg-[#6F7F8C] w-full max-w-md rounded-t-[3rem] p-10 space-y-6 shadow-2xl max-h-[85vh] overflow-y-auto no-scrollbar animate-in slide-in-from-bottom duration-500 border-t border-white/10 text-[#F2F2F0]">
@@ -620,7 +633,11 @@
                                     <div className="space-y-5 animate-in slide-in-from-bottom duration-300">
                                         <div className="space-y-1">
                                             <label className="text-[10px] opacity-30 font-bold ml-2 uppercase tracking-widest">事項名稱</label>
-                                            <input className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10 transition-colors" value={editingTask?.text || ''} onChange={e => setEditingTask({...editingTask, text: e.target.value})} />
+                                            <input 
+                                                className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10 transition-colors" 
+                                                value={editingTask?.text || ''} 
+                                                onChange={e => setEditingTask({...editingTask, text: e.target.value})} 
+                                            />
                                         </div>
                                         <div className="space-y-2">
                                             <label className="text-[10px] opacity-30 font-bold ml-2 uppercase tracking-widest flex items-center gap-1"><Icon name="Camera" size={10} /> 圖片</label>
