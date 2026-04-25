@@ -783,18 +783,25 @@
                                             <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">日期</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.day} onChange={e => setNewExpense({...newExpense, day: e.target.value})} /></div>
                                         </div>
                                         <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">項目內容</label><input placeholder="例如：強棒麵午餐" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.desc} onChange={e => setNewExpense({...newExpense, desc: e.target.value})} /></div>
-                                        <div className="flex gap-4">
-                                            <div className="flex-1 space-y-1">
-                                                <label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest text-blue-200">幣別 &amp; 總金額</label>
-                                                <div className="flex gap-2">
-                                                    <select className="bg-white/5 rounded-2xl px-3 appearance-none outline-none border border-white/5 text-xs font-bold" value={newExpense.currency} onChange={e => setNewExpense({...newExpense, currency: e.target.value})}>
-                                                        <option value="JPY" className="text-black">¥ 日幣</option>
-                                                        <option value="TWD" className="text-black">NT$ 台幣</option>
-                                                    </select>
-                                                    <input type="number" placeholder={newExpense.currency === 'TWD' ? 'NT$' : '¥'} className="flex-1 bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10 font-bold" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} />
-                                                </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest text-blue-200">幣別</label>
+                                                <select className="w-full bg-white/5 rounded-2xl p-4 appearance-none outline-none border border-white/5 text-xs font-bold" value={newExpense.currency} onChange={e => setNewExpense({...newExpense, currency: e.target.value})}>
+                                                    <option value="JPY" className="text-black">¥ 日幣</option>
+                                                    <option value="TWD" className="text-black">NT$ 台幣</option>
+                                                </select>
                                             </div>
-                                            <div className="w-32 space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">誰付的錢？</label><select className="w-full bg-white/5 rounded-2xl p-4 appearance-none outline-none border border-white/5" value={newExpense.payer} onChange={e => setNewExpense({...newExpense, payer: e.target.value})}><option value="欸比" className="text-black">欸比</option><option value="歐膩" className="text-black">歐膩</option></select></div>
+                                            <div className="space-y-1">
+                                                <label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">誰付的錢？</label>
+                                                <select className="w-full bg-white/5 rounded-2xl p-4 appearance-none outline-none border border-white/5" value={newExpense.payer} onChange={e => setNewExpense({...newExpense, payer: e.target.value})}>
+                                                    <option value="欸比" className="text-black">欸比</option>
+                                                    <option value="歐膩" className="text-black">歐膩</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest text-blue-200">總金額</label>
+                                            <input type="number" placeholder={newExpense.currency === 'TWD' ? 'NT$' : '¥'} className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10 font-bold" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} />
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">欸比應付</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.abbyPortion} onChange={e => setNewExpense({...newExpense, abbyPortion: e.target.value})} /></div>
