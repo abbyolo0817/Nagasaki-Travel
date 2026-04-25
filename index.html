@@ -181,7 +181,7 @@
             const [editingId, setEditingId] = useState(null);
             
             const [newItem, setNewItem] = useState({ title: '', location: '', note: '', day: 1, category: '觀光', mapUrl: '', time: '' });
-            const [newExpense, setNewExpense] = useState({ desc: '', amount: '', payer: '', abbyPortion: '', unniPortion: '', settled: false, month: '', day: '' });
+            const [newExpense, setNewExpense] = useState({ desc: '', amount: '', payer: '', abbyPortion: '', unniPortion: '', settled: false, month: '', day: '', currency: 'JPY' });
             const [newTodoTitle, setNewTodoTitle] = useState('');
             const [taskInputs, setTaskInputs] = useState({});
             const [commentText, setCommentText] = useState({});
@@ -292,9 +292,33 @@
             const saveExpense = async () => {
                 if (!newExpense.desc || !newExpense.amount) return;
                 const ref = db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('expenses');
-                await ref.add({ ...newExpense, amount: Number(newExpense.amount), abbyPortion: Number(newExpense.abbyPortion), unniPortion: Number(newExpense.unniPortion), createdAt: Date.now() });
+                const data = { ...newExpense, amount: Number(newExpense.amount), abbyPortion: Number(newExpense.abbyPortion), unniPortion: Number(newExpense.unniPortion) };
+                if (modalType === 'edit_expense' && editingId) {
+                    await ref.doc(editingId).update(data);
+                } else {
+                    await ref.add({ ...data, createdAt: Date.now() });
+                }
                 closeModal();
             };
+
+            const openEditExpense = (exp) => {
+                setNewExpense({
+                    desc: exp.desc || '',
+                    amount: exp.amount || '',
+                    payer: exp.payer || '',
+                    abbyPortion: exp.abbyPortion || '',
+                    unniPortion: exp.unniPortion || '',
+                    settled: exp.settled || false,
+                    month: exp.month || '',
+                    day: exp.day || '',
+                    currency: exp.currency || 'JPY'
+                });
+                setEditingId(exp.id);
+                setModalType('edit_expense');
+                setIsModalOpen(true);
+            };
+
+            const currencySymbol = (currency) => (currency || 'JPY') === 'TWD' ? 'NT$' : '¥';
 
             const saveTodo = async () => {
                 if (!newTodoTitle) return;
@@ -425,20 +449,26 @@
             const closeModal = () => {
                 setIsModalOpen(false);
                 setNewItem({ title: '', location: '', note: '', day: 1, category: '觀光', mapUrl: '', time: '' });
-                setNewExpense({ desc: '', amount: '', payer: currentUser, abbyPortion: '', unniPortion: '', settled: false, month: '', day: '' });
+                setNewExpense({ desc: '', amount: '', payer: currentUser, abbyPortion: '', unniPortion: '', settled: false, month: '', day: '', currency: 'JPY' });
                 setNewTodoTitle('');
                 setEditingTask(null);
                 setEditingId(null);
             };
 
             const summary = useMemo(() => {
-                let uoa = 0, aou = 0;
-                expenses.filter(e => !e.settled).forEach(e => {
-                    if (e.payer === '欸比') uoa += Number(e.unniPortion || 0);
-                    else aou += Number(e.abbyPortion || 0);
-                });
-                const balance = uoa - aou;
-                return { balance: Math.abs(balance), who: balance >= 0 ? '歐膩' : '欸比' };
+                const calc = (currency) => {
+                    const filtered = (payer) => expenses.filter(e => e.payer === payer && (e.currency || 'JPY') === currency);
+                    const unniTotal = filtered('歐膩').reduce((acc, e) => acc + Number(e.amount), 0);
+                    const abbyTotal = filtered('欸比').reduce((acc, e) => acc + Number(e.amount), 0);
+                    let uoa = 0, aou = 0;
+                    expenses.filter(e => !e.settled && (e.currency || 'JPY') === currency).forEach(e => {
+                        if (e.payer === '欸比') uoa += Number(e.unniPortion || 0);
+                        else aou += Number(e.abbyPortion || 0);
+                    });
+                    const diff = uoa - aou;
+                    return { unniTotal, abbyTotal, balance: Math.abs(diff), who: diff >= 0 ? '歐膩' : '欸比' };
+                };
+                return { JPY: calc('JPY'), TWD: calc('TWD') };
             }, [expenses]);
 
             if (!currentUser) {
@@ -561,12 +591,28 @@
                                     <div className="absolute inset-0 opacity-[0.05] texture-felt pointer-events-none"></div>
                                     <p className="text-[10px] opacity-40 uppercase tracking-[0.4em] mb-4 font-black text-center">目前結算摘要</p>
                                     <div className="flex justify-around items-center mb-6 relative z-10 text-center">
-                                        <div><p className="text-[10px] opacity-40 mb-1 font-bold uppercase">歐膩付了</p><p className="text-xl font-black">¥{expenses.filter(e=>e.payer==='歐膩').reduce((acc,curr)=>acc+Number(curr.amount),0).toLocaleString()}</p></div>
+                                        <div>
+                                            <p className="text-[10px] opacity-40 mb-1 font-bold uppercase">歐膩付了</p>
+                                            {summary.JPY.unniTotal > 0 && <p className="text-xl font-black">¥{summary.JPY.unniTotal.toLocaleString()}</p>}
+                                            {summary.TWD.unniTotal > 0 && <p className="text-xl font-black">NT${summary.TWD.unniTotal.toLocaleString()}</p>}
+                                            {summary.JPY.unniTotal === 0 && summary.TWD.unniTotal === 0 && <p className="text-xl font-black opacity-30">—</p>}
+                                        </div>
                                         <div className="w-[1px] h-8 bg-white/10"></div>
-                                        <div><p className="text-[10px] opacity-40 mb-1 font-bold uppercase">欸比付了</p><p className="text-xl font-black">¥{expenses.filter(e=>e.payer==='欸比').reduce((acc,curr)=>acc+Number(curr.amount),0).toLocaleString()}</p></div>
+                                        <div>
+                                            <p className="text-[10px] opacity-40 mb-1 font-bold uppercase">欸比付了</p>
+                                            {summary.JPY.abbyTotal > 0 && <p className="text-xl font-black">¥{summary.JPY.abbyTotal.toLocaleString()}</p>}
+                                            {summary.TWD.abbyTotal > 0 && <p className="text-xl font-black">NT${summary.TWD.abbyTotal.toLocaleString()}</p>}
+                                            {summary.JPY.abbyTotal === 0 && summary.TWD.abbyTotal === 0 && <p className="text-xl font-black opacity-30">—</p>}
+                                        </div>
                                     </div>
-                                    <div className="bg-black/20 p-5 rounded-3xl text-center relative z-10 shadow-inner">
-                                        <h2 className="text-xl font-black tracking-tight">{summary.balance === 0 ? "全部結清囉！" : `${summary.who} 還需支付 ¥${summary.balance.toLocaleString()}`}</h2>
+                                    <div className="bg-black/20 p-5 rounded-3xl text-center relative z-10 shadow-inner space-y-1">
+                                        {summary.JPY.balance === 0 && summary.TWD.balance === 0
+                                            ? <h2 className="text-xl font-black tracking-tight">全部結清囉！</h2>
+                                            : <>
+                                                {summary.JPY.balance > 0 && <h2 className="text-lg font-black tracking-tight">{summary.JPY.who} 還需支付 ¥{summary.JPY.balance.toLocaleString()}</h2>}
+                                                {summary.TWD.balance > 0 && <h2 className="text-lg font-black tracking-tight">{summary.TWD.who} 還需支付 NT${summary.TWD.balance.toLocaleString()}</h2>}
+                                              </>
+                                        }
                                     </div>
                                 </div>
                                 <div className="space-y-4">
@@ -578,15 +624,22 @@
                                                     <div className="flex items-center gap-4">
                                                         <button onClick={() => db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('expenses').doc(exp.id).update({ settled: !exp.settled })} className="active:scale-75 transition-transform"><Icon name={exp.settled ? "CheckCircle2" : "Circle"} className={exp.settled ? "text-green-400" : "opacity-20"} size={24}/></button>
                                                         <div>
-                                                            <div className="flex items-center gap-2 mb-0.5"><span className="text-[9px] bg-white/10 px-2 py-0.5 rounded font-black opacity-60">{exp.month}/{exp.day}</span><p className="font-bold text-sm tracking-tight">{exp.desc}</p></div>
-                                                            <p className="text-[10px] opacity-40 font-bold uppercase tracking-widest">{exp.payer} 付了 ¥{Number(exp.amount).toLocaleString()}</p>
+                                                            <div className="flex items-center gap-2 mb-0.5">
+                                                                <span className="text-[9px] bg-white/10 px-2 py-0.5 rounded font-black opacity-60">{exp.month}/{exp.day}</span>
+                                                                <span className="text-[9px] bg-white/10 px-2 py-0.5 rounded font-black opacity-60">{exp.currency || 'JPY'}</span>
+                                                                <p className="font-bold text-sm tracking-tight">{exp.desc}</p>
+                                                            </div>
+                                                            <p className="text-[10px] opacity-40 font-bold uppercase tracking-widest">{exp.payer} 付了 {currencySymbol(exp.currency)}{Number(exp.amount).toLocaleString()}</p>
                                                         </div>
                                                     </div>
-                                                    <button onClick={() => deleteItem(exp.id, 'expenses')} className="opacity-10 group-hover:opacity-100 transition-opacity p-1"><Icon name="X" size={16}/></button>
+                                                    <div className="flex items-center gap-1">
+                                                        <button onClick={() => openEditExpense(exp)} className="opacity-10 group-hover:opacity-100 transition-opacity p-1"><Icon name="Edit3" size={16}/></button>
+                                                        <button onClick={() => deleteItem(exp.id, 'expenses')} className="opacity-10 group-hover:opacity-100 transition-opacity p-1"><Icon name="X" size={16}/></button>
+                                                    </div>
                                                 </div>
                                                 <div className="flex gap-4 text-[10px] opacity-40 border-t border-white/5 pt-3 font-bold tracking-[0.1em] relative z-10">
-                                                    <div className="flex-1">欸比份額: ¥{Number(exp.abbyPortion || 0).toLocaleString()}</div>
-                                                    <div className="flex-1">歐膩份額: ¥{Number(exp.unniPortion || 0).toLocaleString()}</div>
+                                                    <div className="flex-1">欸比份額: {currencySymbol(exp.currency)}{Number(exp.abbyPortion || 0).toLocaleString()}</div>
+                                                    <div className="flex-1">歐膩份額: {currencySymbol(exp.currency)}{Number(exp.unniPortion || 0).toLocaleString()}</div>
                                                 </div>
                                             </div>
                                             {exp.settled && <div className="stamp-mark font-serif-aesthetic">已付款</div>}
@@ -661,9 +714,10 @@
                             <div className="bg-[#6F7F8C] w-full max-w-md rounded-t-[3rem] p-10 space-y-6 shadow-2xl max-h-[85vh] overflow-y-auto no-scrollbar animate-in slide-in-from-bottom duration-500 border-t border-white/10 text-[#F2F2F0]">
                                 <div className="flex justify-between items-center mb-2">
                                     <h2 className="text-2xl font-light tracking-tighter uppercase">
-                                        {modalType === 'edit_task' ? '編輯細項' : 
-                                         modalType === 'todo' ? '建立清單' : 
-                                         modalType.includes('itinerary') ? (editingId ? '修改行程' : '新增行程') : '新增支出紀錄'}
+                                        {modalType === 'edit_task' ? '編輯細項' :
+                                         modalType === 'todo' ? '建立清單' :
+                                         modalType.includes('itinerary') ? (editingId ? '修改行程' : '新增行程') :
+                                         modalType === 'edit_expense' ? '修改支出' : '新增支出紀錄'}
                                     </h2>
                                     <button onClick={closeModal} className="bg-white/5 w-10 h-10 rounded-full flex items-center justify-center opacity-40 hover:opacity-100 active:scale-90 transition-all shadow-lg"><Icon name="X" size={20}/></button>
                                 </div>
@@ -730,14 +784,23 @@
                                         </div>
                                         <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">項目內容</label><input placeholder="例如：強棒麵午餐" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.desc} onChange={e => setNewExpense({...newExpense, desc: e.target.value})} /></div>
                                         <div className="flex gap-4">
-                                            <div className="flex-1 space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest text-blue-200">總金額 (JPY)</label><input type="number" placeholder="¥" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10 font-bold" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} /></div>
+                                            <div className="flex-1 space-y-1">
+                                                <label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest text-blue-200">幣別 &amp; 總金額</label>
+                                                <div className="flex gap-2">
+                                                    <select className="bg-white/5 rounded-2xl px-3 appearance-none outline-none border border-white/5 text-xs font-bold" value={newExpense.currency} onChange={e => setNewExpense({...newExpense, currency: e.target.value})}>
+                                                        <option value="JPY" className="text-black">¥ 日幣</option>
+                                                        <option value="TWD" className="text-black">NT$ 台幣</option>
+                                                    </select>
+                                                    <input type="number" placeholder={newExpense.currency === 'TWD' ? 'NT$' : '¥'} className="flex-1 bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10 font-bold" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} />
+                                                </div>
+                                            </div>
                                             <div className="w-32 space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">誰付的錢？</label><select className="w-full bg-white/5 rounded-2xl p-4 appearance-none outline-none border border-white/5" value={newExpense.payer} onChange={e => setNewExpense({...newExpense, payer: e.target.value})}><option value="欸比" className="text-black">欸比</option><option value="歐膩" className="text-black">歐膩</option></select></div>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">欸比應付</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.abbyPortion} onChange={e => setNewExpense({...newExpense, abbyPortion: e.target.value})} /></div>
                                             <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">歐膩應付</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.unniPortion} onChange={e => setNewExpense({...newExpense, unniPortion: e.target.value})} /></div>
                                         </div>
-                                        <button onClick={saveExpense} className="w-full py-5 rounded-2xl bg-[#8A857D] font-bold text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all mt-4 border border-white/5">記錄這一筆</button>
+                                        <button onClick={saveExpense} className="w-full py-5 rounded-2xl bg-[#8A857D] font-bold text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all mt-4 border border-white/5">{modalType === 'edit_expense' ? '儲存修改' : '記錄這一筆'}</button>
                                     </div>
                                 )}
                             </div>
