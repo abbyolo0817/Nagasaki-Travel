@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>長崎旅遊APP</title>
+    <title>長崎旅遊小助手 - 欸比 & 歐膩</title>
     
     <!-- 1. Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -186,6 +186,7 @@
             const [taskInputs, setTaskInputs] = useState({});
             const [commentText, setCommentText] = useState({});
             const [commentImage, setCommentImage] = useState({});
+            const [lightboxImage, setLightboxImage] = useState(null);
             const [editingTask, setEditingTask] = useState(null); // { todoId, id, text, image, url }
 
             const categoryStyles = {
@@ -639,7 +640,7 @@
                                                             {c.user === currentUser && <button onClick={() => deleteComment(item.id, c.id)} className="opacity-0 group-hover:opacity-20 transition-opacity p-1 mt-1"><Icon name="X" size={10}/></button>}
                                                             <div className={`px-3 py-2 rounded-2xl text-[11px] shadow-sm ${c.user === currentUser ? 'bg-blue-500/30 rounded-tr-none text-white' : 'bg-white/10 rounded-tl-none text-white/80'}`}>
                                                                 {c.text && <p className="break-all">{renderTextWithLinks(c.text)}</p>}
-                                                                {c.image && <img src={c.image} alt="" className="mt-1 rounded-xl max-w-[160px] w-full object-cover border border-white/10" />}
+                                                                {c.image && <img src={c.image} alt="" onClick={() => setLightboxImage(c.image)} className="mt-1 rounded-xl max-w-[160px] w-full object-cover border border-white/10 cursor-zoom-in active:scale-95 transition-transform" />}
                                                             </div>
                                                             {c.user !== currentUser && <button onClick={() => deleteComment(item.id, c.id)} className="opacity-0 group-hover:opacity-20 transition-opacity p-1 mt-1"><Icon name="X" size={10}/></button>}
                                                         </div>
@@ -753,7 +754,7 @@
                                                     {(task.image || task.url) && (
                                                         <div className="ml-8 flex flex-col gap-2 mt-1">
                                                             {task.image && (
-                                                                <img src={task.image} alt="attachment" className="w-24 h-24 object-cover rounded-xl border border-white/10 shadow-sm" />
+                                                                <img src={task.image} alt="attachment" onClick={() => setLightboxImage(task.image)} className="w-24 h-24 object-cover rounded-xl border border-white/10 shadow-sm cursor-zoom-in active:scale-95 transition-transform" />
                                                             )}
                                                             {task.url && (
                                                                 <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-300 flex items-center gap-1.5 hover:underline bg-white/5 p-2 rounded-lg w-fit">
@@ -789,6 +790,12 @@
                     }} className="fixed bottom-8 right-6 w-16 h-16 bg-[#B5AEA4] rounded-[2.2rem] flex items-center justify-center shadow-2xl z-30 active:scale-90 transition-all border-4 border-black/5 ring-4 ring-white/5">
                         <Icon name="Plus" size={32} className="text-[#3A434D]" />
                     </button>
+
+                    {lightboxImage && (
+                        <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4 animate-zoom" onClick={() => setLightboxImage(null)}>
+                            <img src={lightboxImage} className="max-w-full max-h-full rounded-2xl shadow-2xl object-contain" />
+                        </div>
+                    )}
 
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[110] flex items-end justify-center px-4 animate-in fade-in duration-300" onClick={e => e.target === e.currentTarget && closeModal()}>
