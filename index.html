@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>長崎旅遊小助手 - 欸比 & 歐膩</title>
+    <title>長崎旅遊APP</title>
     
     <!-- 1. Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -181,10 +181,11 @@
             const [editingId, setEditingId] = useState(null);
             
             const [newItem, setNewItem] = useState({ title: '', location: '', note: '', day: 1, category: '觀光', mapUrl: '', time: '' });
-            const [newExpense, setNewExpense] = useState({ desc: '', amount: '', payer: '', abbyPortion: '', unniPortion: '', settled: false, month: '', day: '', currency: 'JPY' });
+            const [newExpense, setNewExpense] = useState({ desc: '', amount: '', payer: '欸比', abbyPortion: '', unniPortion: '', settled: false, month: '', day: '', currency: 'JPY', image: '' });
             const [newTodoTitle, setNewTodoTitle] = useState('');
             const [taskInputs, setTaskInputs] = useState({});
             const [commentText, setCommentText] = useState({});
+            const [commentImage, setCommentImage] = useState({});
             const [editingTask, setEditingTask] = useState(null); // { todoId, id, text, image, url }
 
             const categoryStyles = {
@@ -222,6 +223,9 @@
 
             const sortedItinerary = useMemo(() => {
                 return [...itinerary].sort((a, b) => {
+                    if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
+                    if (a.order !== undefined) return -1;
+                    if (b.order !== undefined) return 1;
                     const getTimeValue = (str) => {
                         if (!str || typeof str !== 'string') return null;
                         const match = str.match(/\d{1,2}:\d{2}/);
@@ -231,7 +235,6 @@
                     };
                     const va = getTimeValue(a.time);
                     const vb = getTimeValue(b.time);
-                    
                     if (va !== null && vb !== null) return va - vb;
                     if (va !== null) return -1;
                     if (vb !== null) return 1;
@@ -273,13 +276,66 @@
                 await db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection(type).doc(id).delete();
             };
 
+            const moveItinerary = async (dayItems, index, direction) => {
+                const targetIndex = index + direction;
+                if (targetIndex < 0 || targetIndex >= dayItems.length) return;
+                const ref = db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('itinerary');
+                const batch = db.batch();
+                dayItems.forEach((item, i) => {
+                    let newOrder = i;
+                    if (i === index) newOrder = targetIndex;
+                    else if (i === targetIndex) newOrder = index;
+                    batch.update(ref.doc(item.id), { order: newOrder });
+                });
+                await batch.commit();
+            };
+
+            const compressImage = (file, callback) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let w = img.width, h = img.height;
+                        const MAX = 800;
+                        if (w > h) { if (w > MAX) { h *= MAX / w; w = MAX; } }
+                        else { if (h > MAX) { w *= MAX / h; h = MAX; } }
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        callback(canvas.toDataURL('image/jpeg', 0.6));
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleExpenseImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                compressImage(file, (dataUrl) => setNewExpense(prev => ({ ...prev, image: dataUrl })));
+            };
+
+            const handleCommentImageUpload = (itemId, e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                compressImage(file, (dataUrl) => setCommentImage(prev => ({ ...prev, [itemId]: dataUrl })));
+            };
+
             const postComment = async (itemId) => {
-                if (!commentText[itemId] || !user) return;
+                if (!commentText[itemId] && !commentImage[itemId]) return;
+                if (!user) return;
                 const ref = db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('itinerary').doc(itemId);
                 const item = itinerary.find(i => i.id === itemId);
-                const newComments = [...(item.comments || []), { id: Date.now().toString(), user: currentUser, text: commentText[itemId], time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }];
+                const newComments = [...(item.comments || []), {
+                    id: Date.now().toString(),
+                    user: currentUser,
+                    text: commentText[itemId] || '',
+                    image: commentImage[itemId] || '',
+                    time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+                }];
                 await ref.update({ comments: newComments });
                 setCommentText({ ...commentText, [itemId]: '' });
+                setCommentImage({ ...commentImage, [itemId]: '' });
             };
 
             const deleteComment = async (itemId, commentId) => {
@@ -311,7 +367,8 @@
                     settled: exp.settled || false,
                     month: exp.month || '',
                     day: exp.day || '',
-                    currency: exp.currency || 'JPY'
+                    currency: exp.currency || 'JPY',
+                    image: exp.image || ''
                 });
                 setEditingId(exp.id);
                 setModalType('edit_expense');
@@ -319,6 +376,17 @@
             };
 
             const currencySymbol = (currency) => (currency || 'JPY') === 'TWD' ? 'NT$' : '¥';
+
+            const renderTextWithLinks = (text) => {
+                if (!text) return null;
+                const urlRegex = /(https?:\/\/[^\s]+)/g;
+                const parts = text.split(urlRegex);
+                return parts.map((part, i) =>
+                    urlRegex.test(part)
+                        ? <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 opacity-80 hover:opacity-100 break-all">{part}</a>
+                        : <span key={i}>{part}</span>
+                );
+            };
 
             const saveTodo = async () => {
                 if (!newTodoTitle) return;
@@ -449,7 +517,7 @@
             const closeModal = () => {
                 setIsModalOpen(false);
                 setNewItem({ title: '', location: '', note: '', day: 1, category: '觀光', mapUrl: '', time: '' });
-                setNewExpense({ desc: '', amount: '', payer: currentUser, abbyPortion: '', unniPortion: '', settled: false, month: '', day: '', currency: 'JPY' });
+                setNewExpense({ desc: '', amount: '', payer: currentUser, abbyPortion: '', unniPortion: '', settled: false, month: '', day: '', currency: 'JPY', image: '' });
                 setNewTodoTitle('');
                 setEditingTask(null);
                 setEditingId(null);
@@ -457,16 +525,13 @@
 
             const summary = useMemo(() => {
                 const calc = (currency) => {
-                    const filtered = (payer) => expenses.filter(e => e.payer === payer && (e.currency || 'JPY') === currency);
-                    const unniTotal = filtered('歐膩').reduce((acc, e) => acc + Number(e.amount), 0);
-                    const abbyTotal = filtered('欸比').reduce((acc, e) => acc + Number(e.amount), 0);
                     let uoa = 0, aou = 0;
                     expenses.filter(e => !e.settled && (e.currency || 'JPY') === currency).forEach(e => {
                         if (e.payer === '欸比') uoa += Number(e.unniPortion || 0);
                         else aou += Number(e.abbyPortion || 0);
                     });
                     const diff = uoa - aou;
-                    return { unniTotal, abbyTotal, balance: Math.abs(diff), who: diff >= 0 ? '歐膩' : '欸比' };
+                    return { balance: Math.abs(diff), who: diff >= 0 ? '歐膩' : '欸比' };
                 };
                 return { JPY: calc('JPY'), TWD: calc('TWD') };
             }, [expenses]);
@@ -532,14 +597,18 @@
                                     </h2>
                                     {activeTab === `day${config.totalDays}` && <button onClick={() => db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('settings').doc('config').update({ totalDays: config.totalDays + 1 })} className="text-[10px] opacity-40 font-bold uppercase tracking-widest">+ 增加天數</button>}
                                 </div>
-                                {sortedItinerary.filter(i => i.day === parseInt(activeTab.replace('day',''))).map(item => (
+                                {(() => {
+                                    const dayItems = sortedItinerary.filter(i => i.day === parseInt(activeTab.replace('day','')));
+                                    return dayItems.map((item, dayIndex) => (
                                     <div key={item.id} className="bg-[#8A857D] rounded-[2rem] p-6 shadow-xl border border-white/5 relative overflow-hidden transition-all hover:shadow-2xl">
                                         <div className="flex justify-between mb-4">
                                             <div className="bg-white/10 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 shadow-sm">
                                                 <Icon name={categoryStyles[item.category]?.icon || 'Camera'} size={12}/>
                                                 {item.category || '觀光'}
                                             </div>
-                                            <div className="flex gap-3 opacity-30">
+                                            <div className="flex gap-2 opacity-30">
+                                                <button onClick={() => moveItinerary(dayItems, dayIndex, -1)} disabled={dayIndex === 0} className="p-1 active:scale-90 transition-transform disabled:opacity-30"><Icon name="ChevronUp" size={16}/></button>
+                                                <button onClick={() => moveItinerary(dayItems, dayIndex, 1)} disabled={dayIndex === dayItems.length - 1} className="p-1 active:scale-90 transition-transform disabled:opacity-30"><Icon name="ChevronDown" size={16}/></button>
                                                 <button onClick={() => openEdit(item)} className="p-1 active:scale-90 transition-transform"><Icon name="Edit3" size={16}/></button>
                                                 <button onClick={() => deleteItem(item.id, 'itinerary')} className="p-1 active:scale-90 transition-transform"><Icon name="Trash2" size={16}/></button>
                                             </div>
@@ -566,22 +635,39 @@
                                             <div className="space-y-2 mb-4 max-h-40 overflow-y-auto custom-scrollbar">
                                                 {(item.comments || []).map(c => (
                                                     <div key={c.id} className={`flex flex-col ${c.user === currentUser ? 'items-end' : 'items-start'}`}>
-                                                        <div className="flex items-center gap-2 group max-w-[90%]">
-                                                            {c.user === currentUser && <button onClick={() => deleteComment(item.id, c.id)} className="opacity-0 group-hover:opacity-20 transition-opacity p-1"><Icon name="X" size={10}/></button>}
-                                                            <div className={`px-3 py-1.5 rounded-2xl text-[11px] shadow-sm ${c.user === currentUser ? 'bg-blue-500/30 rounded-tr-none text-white' : 'bg-white/10 rounded-tl-none text-white/80'}`}>{c.text}</div>
-                                                            {c.user !== currentUser && <button onClick={() => deleteComment(item.id, c.id)} className="opacity-0 group-hover:opacity-20 transition-opacity p-1"><Icon name="X" size={10}/></button>}
+                                                        <div className="flex items-start gap-2 group max-w-[90%]">
+                                                            {c.user === currentUser && <button onClick={() => deleteComment(item.id, c.id)} className="opacity-0 group-hover:opacity-20 transition-opacity p-1 mt-1"><Icon name="X" size={10}/></button>}
+                                                            <div className={`px-3 py-2 rounded-2xl text-[11px] shadow-sm ${c.user === currentUser ? 'bg-blue-500/30 rounded-tr-none text-white' : 'bg-white/10 rounded-tl-none text-white/80'}`}>
+                                                                {c.text && <p className="break-all">{renderTextWithLinks(c.text)}</p>}
+                                                                {c.image && <img src={c.image} alt="" className="mt-1 rounded-xl max-w-[160px] w-full object-cover border border-white/10" />}
+                                                            </div>
+                                                            {c.user !== currentUser && <button onClick={() => deleteComment(item.id, c.id)} className="opacity-0 group-hover:opacity-20 transition-opacity p-1 mt-1"><Icon name="X" size={10}/></button>}
                                                         </div>
                                                         <span className="text-[8px] opacity-20 mt-1 font-bold tracking-widest px-1">{c.user}</span>
                                                     </div>
                                                 ))}
                                             </div>
+                                            {commentImage[item.id] && (
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <div className="relative">
+                                                        <img src={commentImage[item.id]} className="w-12 h-12 rounded-xl object-cover border border-white/20" />
+                                                        <button onClick={() => setCommentImage({...commentImage, [item.id]: ''})} className="absolute -top-1 -right-1 w-4 h-4 bg-red-500/80 rounded-full flex items-center justify-center"><Icon name="X" size={8}/></button>
+                                                    </div>
+                                                    <span className="text-[10px] opacity-40">圖片已選取</span>
+                                                </div>
+                                            )}
                                             <div className="flex gap-2 items-center flex-nowrap">
                                                 <input value={commentText[item.id] || ''} onChange={e => setCommentText({...commentText, [item.id]: e.target.value})} placeholder="說點什麼..." className="flex-1 bg-white/5 border-none rounded-xl px-4 py-3 text-xs outline-none focus:bg-white/10 transition-colors min-w-0" onKeyDown={e => e.key === 'Enter' && postComment(item.id)} />
+                                                <label className="flex-shrink-0 w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center cursor-pointer active:scale-90 transition-transform">
+                                                    <Icon name="Camera" size={14}/>
+                                                    <input type="file" accept="image/*" className="hidden" onChange={e => handleCommentImageUpload(item.id, e)} />
+                                                </label>
                                                 <button onClick={() => postComment(item.id)} className="flex-shrink-0 w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center active:scale-90 transition-transform"><Icon name="Send" size={14}/></button>
                                             </div>
                                         </div>
                                     </div>
-                                ))}
+                                    ));
+                                })()}
                             </div>
                         )}
 
@@ -590,27 +676,12 @@
                                 <div className="bg-[#8A857D] p-8 rounded-[2.5rem] shadow-2xl border border-white/10 text-center relative overflow-hidden">
                                     <div className="absolute inset-0 opacity-[0.05] texture-felt pointer-events-none"></div>
                                     <p className="text-[10px] opacity-40 uppercase tracking-[0.4em] mb-4 font-black text-center">目前結算摘要</p>
-                                    <div className="flex justify-around items-center mb-6 relative z-10 text-center">
-                                        <div>
-                                            <p className="text-[10px] opacity-40 mb-1 font-bold uppercase">歐膩付了</p>
-                                            {summary.JPY.unniTotal > 0 && <p className="text-xl font-black">¥{summary.JPY.unniTotal.toLocaleString()}</p>}
-                                            {summary.TWD.unniTotal > 0 && <p className="text-xl font-black">NT${summary.TWD.unniTotal.toLocaleString()}</p>}
-                                            {summary.JPY.unniTotal === 0 && summary.TWD.unniTotal === 0 && <p className="text-xl font-black opacity-30">—</p>}
-                                        </div>
-                                        <div className="w-[1px] h-8 bg-white/10"></div>
-                                        <div>
-                                            <p className="text-[10px] opacity-40 mb-1 font-bold uppercase">欸比付了</p>
-                                            {summary.JPY.abbyTotal > 0 && <p className="text-xl font-black">¥{summary.JPY.abbyTotal.toLocaleString()}</p>}
-                                            {summary.TWD.abbyTotal > 0 && <p className="text-xl font-black">NT${summary.TWD.abbyTotal.toLocaleString()}</p>}
-                                            {summary.JPY.abbyTotal === 0 && summary.TWD.abbyTotal === 0 && <p className="text-xl font-black opacity-30">—</p>}
-                                        </div>
-                                    </div>
-                                    <div className="bg-black/20 p-5 rounded-3xl text-center relative z-10 shadow-inner space-y-1">
+                                    <div className="relative z-10 space-y-2">
                                         {summary.JPY.balance === 0 && summary.TWD.balance === 0
-                                            ? <h2 className="text-xl font-black tracking-tight">全部結清囉！</h2>
+                                            ? <p className="text-xl font-black tracking-tight">全部結清囉！🎉</p>
                                             : <>
-                                                {summary.JPY.balance > 0 && <h2 className="text-lg font-black tracking-tight">{summary.JPY.who} 還需支付 ¥{summary.JPY.balance.toLocaleString()}</h2>}
-                                                {summary.TWD.balance > 0 && <h2 className="text-lg font-black tracking-tight">{summary.TWD.who} 還需支付 NT${summary.TWD.balance.toLocaleString()}</h2>}
+                                                {summary.JPY.balance > 0 && <p className="text-lg font-black tracking-tight">{summary.JPY.who} 還需支付 {summary.JPY.who === '歐膩' ? '欸比' : '歐膩'} ¥{summary.JPY.balance.toLocaleString()}</p>}
+                                                {summary.TWD.balance > 0 && <p className="text-lg font-black tracking-tight">{summary.TWD.who} 還需支付 {summary.TWD.who === '歐膩' ? '欸比' : '歐膩'} NT${summary.TWD.balance.toLocaleString()}</p>}
                                               </>
                                         }
                                     </div>
@@ -641,6 +712,11 @@
                                                     <div className="flex-1">欸比份額: {currencySymbol(exp.currency)}{Number(exp.abbyPortion || 0).toLocaleString()}</div>
                                                     <div className="flex-1">歐膩份額: {currencySymbol(exp.currency)}{Number(exp.unniPortion || 0).toLocaleString()}</div>
                                                 </div>
+                                                {exp.image && (
+                                                    <div className="mt-3 pt-3 border-t border-white/5 relative z-10">
+                                                        <img src={exp.image} alt="收據" className="w-full rounded-2xl object-cover max-h-48 border border-white/10 shadow-sm" />
+                                                    </div>
+                                                )}
                                             </div>
                                             {exp.settled && <div className="stamp-mark font-serif-aesthetic">已付款</div>}
                                         </div>
@@ -700,11 +776,16 @@
                         )}
                     </main>
 
-                    <button onClick={() => { 
-                        if (activeTab === 'split') setModalType('expense');
-                        else if (activeTab === 'todo') setModalType('todo');
-                        else setModalType('itinerary');
-                        setIsModalOpen(true); 
+                    <button onClick={() => {
+                        if (activeTab === 'split') {
+                            setNewExpense(prev => ({ ...prev, payer: currentUser }));
+                            setModalType('expense');
+                        } else if (activeTab === 'todo') {
+                            setModalType('todo');
+                        } else {
+                            setModalType('itinerary');
+                        }
+                        setIsModalOpen(true);
                     }} className="fixed bottom-8 right-6 w-16 h-16 bg-[#B5AEA4] rounded-[2.2rem] flex items-center justify-center shadow-2xl z-30 active:scale-90 transition-all border-4 border-black/5 ring-4 ring-white/5">
                         <Icon name="Plus" size={32} className="text-[#3A434D]" />
                     </button>
@@ -803,9 +884,31 @@
                                             <label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest text-blue-200">總金額</label>
                                             <input type="number" placeholder={newExpense.currency === 'TWD' ? 'NT$' : '¥'} className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10 font-bold" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} />
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">欸比應付</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.abbyPortion} onChange={e => setNewExpense({...newExpense, abbyPortion: e.target.value})} /></div>
-                                            <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">歐膩應付</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.unniPortion} onChange={e => setNewExpense({...newExpense, unniPortion: e.target.value})} /></div>
+                                        <div className="space-y-3">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex-1 h-[1px] bg-white/10"></div>
+                                                <button onClick={() => { if (!newExpense.amount) return; const half = Math.round(Number(newExpense.amount) / 2); setNewExpense({...newExpense, abbyPortion: half, unniPortion: half}); }} className="text-[10px] font-black uppercase tracking-widest bg-white/10 px-4 py-2 rounded-xl border border-white/10 hover:bg-white/20 active:scale-95 transition-all">平分</button>
+                                                <div className="flex-1 h-[1px] bg-white/10"></div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">欸比應付</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.abbyPortion} onChange={e => setNewExpense({...newExpense, abbyPortion: e.target.value})} /></div>
+                                                <div className="space-y-1"><label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest">歐膩應付</label><input type="number" className="w-full bg-white/5 rounded-2xl p-4 outline-none border border-white/5 focus:bg-white/10" value={newExpense.unniPortion} onChange={e => setNewExpense({...newExpense, unniPortion: e.target.value})} /></div>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] opacity-30 font-black ml-2 uppercase tracking-widest flex items-center gap-1"><Icon name="Camera" size={10}/> 收據照片 (可選)</label>
+                                            {newExpense.image ? (
+                                                <div className="relative rounded-2xl overflow-hidden border border-white/20 group">
+                                                    <img src={newExpense.image} className="w-full object-cover max-h-40" />
+                                                    <button onClick={() => setNewExpense({...newExpense, image: ''})} className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="Trash2" size={18}/></button>
+                                                </div>
+                                            ) : (
+                                                <label className="w-full h-20 bg-white/5 border border-dashed border-white/20 rounded-xl flex items-center justify-center gap-2 cursor-pointer hover:bg-white/10 transition-colors">
+                                                    <Icon name="Camera" size={16} className="opacity-50"/>
+                                                    <span className="text-[10px] opacity-50">點擊上傳收據</span>
+                                                    <input type="file" accept="image/*" className="hidden" onChange={handleExpenseImageUpload} />
+                                                </label>
+                                            )}
                                         </div>
                                         <button onClick={saveExpense} className="w-full py-5 rounded-2xl bg-[#8A857D] font-bold text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all mt-4 border border-white/5">{modalType === 'edit_expense' ? '儲存修改' : '記錄這一筆'}</button>
                                     </div>
