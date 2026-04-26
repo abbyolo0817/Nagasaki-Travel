@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>長崎旅遊小助手 - 欸比 & 歐膩</title>
+    <title>長崎旅遊APP</title>
     
     <!-- 1. Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -187,6 +187,8 @@
             const [commentText, setCommentText] = useState({});
             const [commentImage, setCommentImage] = useState({});
             const [lightboxImage, setLightboxImage] = useState(null);
+            const [editingDayDate, setEditingDayDate] = useState(null);
+            const [dayDateInput, setDayDateInput] = useState('');
             const [editingTask, setEditingTask] = useState(null); // { todoId, id, text, image, url }
 
             const categoryStyles = {
@@ -377,6 +379,12 @@
             };
 
             const currencySymbol = (currency) => (currency || 'JPY') === 'TWD' ? 'NT$' : '¥';
+
+            const saveDayDate = async (day) => {
+                const ref = db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('settings').doc('config');
+                await ref.update({ [`dayDates.${day}`]: dayDateInput.trim() });
+                setEditingDayDate(null);
+            };
 
             const renderTextWithLinks = (text) => {
                 if (!text) return null;
@@ -583,7 +591,10 @@
 
                         <div className="bg-black/20 p-1.5 rounded-2xl flex gap-2 overflow-x-auto no-scrollbar shadow-inner">
                             {Array.from({ length: config.totalDays || 3 }, (_, i) => (
-                                <button key={i} onClick={() => setActiveTab(`day${i+1}`)} className={`flex-none py-3 px-6 rounded-xl text-[10px] font-black tracking-widest transition-all ${activeTab === `day${i+1}` ? 'bg-[#8A857D] shadow-lg text-white' : 'opacity-40 hover:opacity-70'}`}>第 {i+1} 天</button>
+                                <button key={i} onClick={() => setActiveTab(`day${i+1}`)} className={`flex-none py-2 px-5 rounded-xl text-[10px] font-black tracking-widest transition-all flex flex-col items-center gap-0.5 ${activeTab === `day${i+1}` ? 'bg-[#8A857D] shadow-lg text-white' : 'opacity-40 hover:opacity-70'}`}>
+                                    <span>第 {i+1} 天</span>
+                                    {config.dayDates?.[i+1] && <span className="text-[9px] font-bold opacity-70">{config.dayDates[i+1]}</span>}
+                                </button>
                             ))}
                         </div>
                     </header>
@@ -591,13 +602,37 @@
                     <main className="px-6 max-w-md mx-auto relative z-10">
                         {activeTab.startsWith('day') && (
                             <div className="space-y-6 animate-zoom">
-                                <div className="flex items-center justify-between">
-                                    <h2 className="text-xl font-bold flex items-center gap-3">
-                                        <div className="bg-[#8A857D] w-10 h-10 rounded-lg flex items-center justify-center font-serif-aesthetic shadow-inner border border-white/10">{activeTab.replace('day', '')}</div>
-                                        <span className="tracking-tight">第 {activeTab.replace('day', '')} 天 行程</span>
-                                    </h2>
-                                    {activeTab === `day${config.totalDays}` && <button onClick={() => db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('settings').doc('config').update({ totalDays: config.totalDays + 1 })} className="text-[10px] opacity-40 font-bold uppercase tracking-widest">+ 增加天數</button>}
-                                </div>
+                                {(() => {
+                                    const dayNum = parseInt(activeTab.replace('day', ''));
+                                    const dateLabel = config.dayDates?.[dayNum];
+                                    return (
+                                    <div className="flex items-center justify-between">
+                                        <h2 className="text-xl font-bold flex items-center gap-3">
+                                            <div className="bg-[#8A857D] w-10 h-10 rounded-lg flex items-center justify-center font-serif-aesthetic shadow-inner border border-white/10">{dayNum}</div>
+                                            <div className="flex flex-col">
+                                                <span className="tracking-tight leading-tight">第 {dayNum} 天 行程</span>
+                                                {editingDayDate === dayNum ? (
+                                                    <input
+                                                        autoFocus
+                                                        value={dayDateInput}
+                                                        onChange={e => setDayDateInput(e.target.value)}
+                                                        onBlur={() => saveDayDate(dayNum)}
+                                                        onKeyDown={e => e.key === 'Enter' && saveDayDate(dayNum)}
+                                                        placeholder="例：5/1"
+                                                        className="mt-0.5 bg-white/10 rounded-lg px-2 py-0.5 text-[11px] outline-none border border-white/20 w-24 font-normal"
+                                                    />
+                                                ) : (
+                                                    <button onClick={() => { setDayDateInput(dateLabel || ''); setEditingDayDate(dayNum); }} className="flex items-center gap-1 mt-0.5 text-[11px] opacity-40 hover:opacity-80 transition-opacity font-normal tracking-normal text-left">
+                                                        <Icon name="Edit3" size={10}/>
+                                                        <span>{dateLabel || '點此設定日期'}</span>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </h2>
+                                        {activeTab === `day${config.totalDays}` && <button onClick={() => db.collection('artifacts').doc(targetAppId).collection('public').doc('data').collection('settings').doc('config').update({ totalDays: config.totalDays + 1 })} className="text-[10px] opacity-40 font-bold uppercase tracking-widest">+ 增加天數</button>}
+                                    </div>
+                                    );
+                                })()}
                                 {(() => {
                                     const dayItems = sortedItinerary.filter(i => i.day === parseInt(activeTab.replace('day','')));
                                     return dayItems.map((item, dayIndex) => (
